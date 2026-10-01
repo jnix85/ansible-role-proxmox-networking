@@ -1,0 +1,25 @@
+---
+galaxy_info:
+  role_name: proxmox_networking
+  namespace: jparks
+  author: jparks
+  description: >-
+    Installs and configures the base Open vSwitch network stack (bond+bridge,
+    or single-NIC fallback) on a Proxmox VE host. Intended to run before
+    ansible-role-proxmox-sdn, which layers Proxmox SDN zones/vnets on top of
+    the bridge this role creates.
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags:
+    - proxmox
+    - networking
+    - openvswitch
+    - ovs
+    - sdn
+
+dependencies: []

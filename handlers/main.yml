@@ -1,0 +1,10 @@
+---
+# Delegates to tasks/apply.yml so whether invoked via tasks/main.yml's direct
+# import or via an explicit handler notification/flush, the exact same
+# safe apply workflow, 30-second watchdog, and rollback checks are executed.
+- name: Apply network configuration via safe rollback workflow
+  ansible.builtin.include_tasks: apply.yml
+  when:
+    - proxmox_net_apply_changes | bool
+    - not (_proxmox_net_applied | default(false))
+  listen: "apply proxmox network config"

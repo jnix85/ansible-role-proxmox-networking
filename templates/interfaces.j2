@@ -1,0 +1,67 @@
+# Managed by ansible-role-proxmox-networking. Manual edits will be overwritten
+# on the next Ansible run.
+
+{% macro mgmt_addr_block() -%}
+{% if proxmox_net_mgmt_ip | length > 0 %}
+    address {{ proxmox_net_mgmt_ip }}
+{% endif %}
+{% if proxmox_net_mgmt_gateway | length > 0 %}
+    gateway {{ proxmox_net_mgmt_gateway }}
+{% endif %}
+{%- endmacro %}
+
+{% macro ovs_extra_block(bridge_name) -%}
+{% for opt_key, opt_val in proxmox_net_extra_bridge_options.items() %}
+    ovs_extra set bridge {{ bridge_name }} {{ opt_key }}={{ opt_val }}
+{% endfor %}
+{%- endmacro %}
+
+auto lo
+iface lo inet loopback
+
+{% if proxmox_net_mode == 'bond' %}
+allow-{{ proxmox_net_bridge_name }} {{ proxmox_net_bond_name }}
+iface {{ proxmox_net_bond_name }} inet manual
+    ovs_bonds {{ proxmox_net_bond_interfaces | join(' ') }}
+    ovs_type OVSBond
+    ovs_bridge {{ proxmox_net_bridge_name }}
+    ovs_options bond_mode={{ proxmox_net_bond_mode }}{{ ' lacp=active' if proxmox_net_bond_lacp | bool else '' }}
+    ovs_mtu {{ proxmox_net_mtu }}
+{% set bridge_port = proxmox_net_bond_name %}
+{% else %}
+allow-{{ proxmox_net_bridge_name }} {{ proxmox_net_single_interface }}
+iface {{ proxmox_net_single_interface }} inet manual
+    ovs_type OVSPort
+    ovs_bridge {{ proxmox_net_bridge_name }}
+    ovs_mtu {{ proxmox_net_mtu }}
+{% set bridge_port = proxmox_net_single_interface %}
+{% endif %}
+
+auto {{ proxmox_net_bridge_name }}
+allow-ovs {{ proxmox_net_bridge_name }}
+{% if proxmox_net_mgmt_vlan | int == 0 %}
+iface {{ proxmox_net_bridge_name }} inet {{ 'static' if proxmox_net_mgmt_ip | length > 0 else 'manual' }}
+{{ mgmt_addr_block() }}
+    ovs_type OVSBridge
+    ovs_ports {{ bridge_port }}
+    ovs_mtu {{ proxmox_net_mtu }}
+{{ ovs_extra_block(proxmox_net_bridge_name) }}
+{% else %}
+iface {{ proxmox_net_bridge_name }} inet manual
+    ovs_type OVSBridge
+    ovs_ports {{ bridge_port }} vlan{{ proxmox_net_mgmt_vlan }}
+    ovs_mtu {{ proxmox_net_mtu }}
+{{ ovs_extra_block(proxmox_net_bridge_name) }}
+
+auto vlan{{ proxmox_net_mgmt_vlan }}
+allow-{{ proxmox_net_bridge_name }} vlan{{ proxmox_net_mgmt_vlan }}
+iface vlan{{ proxmox_net_mgmt_vlan }} inet {{ 'static' if proxmox_net_mgmt_ip | length > 0 else 'manual' }}
+{{ mgmt_addr_block() }}
+    ovs_type OVSIntPort
+    ovs_bridge {{ proxmox_net_bridge_name }}
+    ovs_options tag={{ proxmox_net_mgmt_vlan }}
+{% endif %}
+
+# Proxmox SDN VNets attach to {{ proxmox_net_bridge_name }} as additional
+# OVSIntPort/fake-bridge interfaces managed separately by
+# ansible-role-proxmox-sdn — do not add per-VLAN stanzas here.

@@ -1,0 +1,16 @@
+---
+# Example playbook. Copy to site.yml (outside this repo, or alongside your
+# own inventory) and adjust the role path if you vendor this role elsewhere.
+#
+# Safety: this play reconfigures the network Ansible is connected through.
+# Run with `--check --diff` first, and roll out with `--limit` / a `serial:
+# 1` strategy on a cluster you care about. If a candidate configuration does
+# not come up cleanly or severs connectivity, the host autonomously reverts
+# to the previous working configuration after 30 seconds.
+
+- name: Configure Proxmox VE base network stack
+  hosts: proxmox
+  become: true
+  serial: 1
+  roles:
+    - role: ansible-role-proxmox-networking

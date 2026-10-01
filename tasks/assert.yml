@@ -1,0 +1,46 @@
+---
+- name: Assert proxmox_net_mode is valid
+  ansible.builtin.assert:
+    that:
+      - proxmox_net_mode in ['bond', 'single_nic']
+    fail_msg: >-
+      proxmox_net_mode must be 'bond' or 'single_nic', got
+      '{{ proxmox_net_mode }}'.
+
+- name: Assert bond configuration is complete when mode is bond
+  ansible.builtin.assert:
+    that:
+      - proxmox_net_bond_interfaces | length >= 2
+      - proxmox_net_bond_name | length > 0
+    fail_msg: >-
+      proxmox_net_mode is 'bond' but proxmox_net_bond_interfaces has
+      {{ proxmox_net_bond_interfaces | length }} entries — a bond needs at
+      least 2 physical NICs. If this host only has one NIC, set
+      proxmox_net_mode: single_nic instead.
+  when: proxmox_net_mode == 'bond'
+
+- name: Assert single-NIC configuration is complete when mode is single_nic
+  ansible.builtin.assert:
+    that:
+      - proxmox_net_single_interface | length > 0
+    fail_msg: >-
+      proxmox_net_mode is 'single_nic' but proxmox_net_single_interface is
+      not set — provide the physical interface name (e.g. eth0).
+  when: proxmox_net_mode == 'single_nic'
+
+- name: Assert bridge name and type are set
+  ansible.builtin.assert:
+    that:
+      - proxmox_net_bridge_name | length > 0
+      - proxmox_net_bridge_type in ['OVSBridge']
+    fail_msg: "proxmox_net_bridge_name must be set and proxmox_net_bridge_type must be OVSBridge."
+
+- name: Assert management IP looks like a CIDR when set
+  ansible.builtin.assert:
+    that:
+      - proxmox_net_mgmt_ip | ipaddr('host/prefix')
+    fail_msg: >-
+      proxmox_net_mgmt_ip ('{{ proxmox_net_mgmt_ip }}') must be in CIDR form,
+      e.g. 10.24.0.11/24. This filter requires the 'netaddr' python package
+      (installed via bootstrap/requirements.txt).
+  when: proxmox_net_mgmt_ip | length > 0

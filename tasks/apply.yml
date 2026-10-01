@@ -1,0 +1,154 @@
+---
+# Apply network configuration with an autonomous 30-second rollback watchdog.
+#
+# If candidate network configuration breaks connectivity, the host-side
+# watchdog (running in a detached systemd unit) automatically restores
+# /etc/network/interfaces from .ansible-rollback and executes ifreload -a,
+# recovering the node without needing console access.
+#
+# If the host remains reachable over SSH within the window, live safety
+# checks (bridge UP, IP assignment, gateway ping) verify network health.
+# If any safety check fails, an immediate revert is triggered.
+# Only when all checks pass is the watchdog disarmed and change committed.
+
+- name: Execute network apply and safety verification
+  when:
+    - proxmox_net_apply_changes | bool
+    - _proxmox_net_interfaces_template.changed | default(true)
+    - not (_proxmox_net_applied | default(false))
+  block:
+    - name: Mark network apply in progress
+      ansible.builtin.set_fact:
+        _proxmox_net_applied: true
+
+    - name: Ensure any prior rollback watchdog is disarmed
+      ansible.builtin.command: "{{ proxmox_net_rollback_helper_path }} disarm"
+      changed_when: false
+      failed_when: false
+
+    - name: Arm autonomous rollback watchdog on host
+      ansible.builtin.command: >-
+        systemd-run
+        --unit=proxmox-net-rollback
+        --description="Proxmox network safety rollback watchdog"
+        {{ proxmox_net_rollback_helper_path }} arm {{ proxmox_net_revert_timeout }}
+      changed_when: true
+      when: proxmox_net_revert_on_failure | bool
+
+    - name: Apply candidate network configuration via ifreload
+      ansible.builtin.command: ifreload -a
+      changed_when: true
+      ignore_errors: true
+      ignore_unreachable: true
+
+    - name: Wait for network connection to recover
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ proxmox_net_wait_for_connection_timeout }}"
+        delay: 2
+
+    - name: Check if autonomous watchdog triggered a revert during isolation
+      ansible.builtin.stat:
+        path: /run/proxmox-net-reverted
+      register: _proxmox_net_revert_marker
+      when: proxmox_net_revert_on_failure | bool
+
+    - name: Handle autonomous watchdog revert
+      when:
+        - proxmox_net_revert_on_failure | bool
+        - _proxmox_net_revert_marker.stat.exists | default(false)
+      block:
+        - name: Read revert marker details
+          ansible.builtin.slurp:
+            src: /run/proxmox-net-reverted
+          register: _proxmox_net_revert_details
+
+        - name: Clean up watchdog state after revert
+          ansible.builtin.command: "{{ proxmox_net_rollback_helper_path }} disarm"
+          changed_when: false
+          failed_when: false
+
+        - name: Fail play due to autonomous network rollback
+          ansible.builtin.fail:
+            msg: >-
+              Network failed to come up cleanly within {{ proxmox_net_revert_timeout }} seconds.
+              The host watchdog autonomously reverted /etc/network/interfaces to its previous working state
+              and executed ifreload -a. Revert details: {{ _proxmox_net_revert_details.content | b64decode | trim }}
+
+    # --- Live Safety Checks ---
+    - name: Run live safety checks on active network
+      when: proxmox_net_revert_on_failure | bool
+      block:
+        - name: Verify bridge interface is UP
+          ansible.builtin.command: "ip link show dev {{ proxmox_net_bridge_name }}"
+          register: _proxmox_net_check_bridge
+          changed_when: false
+          failed_when: false
+          retries: 3
+          delay: 2
+          until: _proxmox_net_check_bridge.rc == 0
+
+        - name: Determine expected management interface
+          ansible.builtin.set_fact:
+            _proxmox_net_mgmt_iface: "{{ (proxmox_net_mgmt_vlan | int == 0) | ternary(proxmox_net_bridge_name, 'vlan' ~ proxmox_net_mgmt_vlan) }}"
+
+        - name: Verify management IP is assigned to expected interface
+          ansible.builtin.command: "ip -o addr show dev {{ _proxmox_net_mgmt_iface }}"
+          register: _proxmox_net_check_ip
+          changed_when: false
+          failed_when: false
+          when: proxmox_net_mgmt_ip | length > 0
+
+        - name: Ping default management gateway
+          ansible.builtin.command: "ping -c 2 -W 2 {{ proxmox_net_mgmt_gateway }}"
+          register: _proxmox_net_check_gw
+          changed_when: false
+          failed_when: false
+          retries: 3
+          delay: 2
+          until: _proxmox_net_check_gw.rc == 0
+          when:
+            - proxmox_net_safety_check_ping_gateway | bool
+            - proxmox_net_mgmt_gateway | length > 0
+
+        - name: Evaluate safety check results
+          ansible.builtin.set_fact:
+            _proxmox_net_safety_failed: >-
+              {{
+                (_proxmox_net_check_bridge.rc != 0) or
+                (proxmox_net_mgmt_ip | length > 0 and proxmox_net_mgmt_ip not in _proxmox_net_check_ip.stdout) or
+                (proxmox_net_safety_check_ping_gateway | bool and proxmox_net_mgmt_gateway | length > 0 and _proxmox_net_check_gw.rc != 0)
+              }}
+            _proxmox_net_safety_failure_reason: >-
+              {{
+                'Bridge interface ' ~ proxmox_net_bridge_name ~ ' is not UP' if _proxmox_net_check_bridge.rc != 0
+                else ('Management IP ' ~ proxmox_net_mgmt_ip ~ ' is not assigned to ' ~ _proxmox_net_mgmt_iface if (proxmox_net_mgmt_ip | length > 0 and proxmox_net_mgmt_ip not in _proxmox_net_check_ip.stdout)
+                else ('Management gateway ' ~ proxmox_net_mgmt_gateway ~ ' unreachable via ping' if (proxmox_net_safety_check_ping_gateway | bool and proxmox_net_mgmt_gateway | length > 0 and _proxmox_net_check_gw.rc != 0)
+                else 'Unknown failure'))
+              }}
+
+        - name: Trigger immediate revert on safety check failure
+          when: _proxmox_net_safety_failed | bool
+          block:
+            - name: Execute immediate revert
+              ansible.builtin.command: "{{ proxmox_net_rollback_helper_path }} revert"
+              changed_when: true
+
+            - name: Disarm watchdog and clean up after immediate revert
+              ansible.builtin.command: "{{ proxmox_net_rollback_helper_path }} disarm"
+              changed_when: false
+              failed_when: false
+
+            - name: Fail task due to safety check failure
+              ansible.builtin.fail:
+                msg: >-
+                  Network safety check failed: {{ _proxmox_net_safety_failure_reason }}.
+                  Configuration was automatically reverted to previous working state.
+
+    - name: Disarm rollback watchdog and commit changes
+      ansible.builtin.command: "{{ proxmox_net_rollback_helper_path }} disarm"
+      changed_when: false
+      when: proxmox_net_revert_on_failure | bool
+
+    - name: Report successful network configuration apply
+      ansible.builtin.debug:
+        msg: "Network configuration successfully applied and verified clean."

@@ -1,0 +1,64 @@
+#!/bin/bash
+# Managed by ansible-role-proxmox-networking. Manual edits will be overwritten.
+set -euo pipefail
+
+BACKUP_FILE="{{ proxmox_net_interfaces_path }}.ansible-rollback"
+TARGET_FILE="{{ proxmox_net_interfaces_path }}"
+STATUS_FILE="/run/proxmox-net-reverted"
+UNIT_NAME="proxmox-net-rollback.service"
+
+log() {
+    logger -t proxmox-net-rollback "$1"
+    echo "$1"
+}
+
+do_revert() {
+    log "Reverting network configuration from $BACKUP_FILE to $TARGET_FILE..."
+    if [ ! -f "$BACKUP_FILE" ]; then
+        log "ERROR: Rollback backup file $BACKUP_FILE does not exist!"
+        exit 1
+    fi
+    cp -f "$BACKUP_FILE" "$TARGET_FILE"
+    ifreload -a
+    echo "reverted at $(date -Iseconds)" > "$STATUS_FILE"
+    log "Network configuration reverted and ifreload -a completed."
+}
+
+case "${1:-}" in
+    arm)
+        TIMEOUT="${2:-{{ proxmox_net_revert_timeout | default(30) }}}"
+        log "Watchdog armed: waiting $TIMEOUT seconds for confirmation..."
+        trap 'log "Watchdog disarmed by signal."; exit 0' TERM INT
+        sleep "$TIMEOUT" &
+        wait $!
+        log "Watchdog expired after $TIMEOUT seconds without confirmation. Initiating rollback..."
+        do_revert
+        ;;
+    revert)
+        log "Immediate revert triggered."
+        systemctl stop "$UNIT_NAME" 2>/dev/null || true
+        do_revert
+        ;;
+    disarm)
+        log "Disarming watchdog and cleaning up."
+        systemctl stop "$UNIT_NAME" 2>/dev/null || true
+        systemctl reset-failed "$UNIT_NAME" 2>/dev/null || true
+        rm -f "$STATUS_FILE" "$BACKUP_FILE"
+        ;;
+    status)
+        if [ -f "$STATUS_FILE" ]; then
+            cat "$STATUS_FILE"
+            exit 2
+        fi
+        if systemctl is-active --quiet "$UNIT_NAME"; then
+            echo "armed"
+            exit 0
+        fi
+        echo "inactive"
+        exit 0
+        ;;
+    *)
+        echo "Usage: $0 {arm [timeout]|revert|disarm|status}" >&2
+        exit 1
+        ;;
+esac

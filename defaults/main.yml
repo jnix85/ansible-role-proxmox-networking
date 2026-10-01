@@ -1,0 +1,53 @@
+---
+# Packages required for the OVS network stack. ifupdown2 is required for
+# `ifreload -a` (live, non-disruptive reload) rather than a full networking
+# restart, which would drop the SSH session Ansible is connected through.
+proxmox_net_packages:
+  - openvswitch-switch
+  - ifupdown2
+
+# "bond" or "single_nic" — explicit, not inferred from list length, so a
+# single-NIC host is a deliberate choice rather than an accident of a short
+# bond_interfaces list.
+proxmox_net_mode: bond
+
+# --- Bond mode (proxmox_net_mode: bond) ---
+proxmox_net_bond_name: bond0
+proxmox_net_bond_interfaces: []          # e.g. [ens18, ens19] — required, >=2 entries
+proxmox_net_bond_mode: balance-slb       # active-backup | balance-slb | balance-tcp
+proxmox_net_bond_lacp: false             # true -> lacp=active (needs balance-tcp + switch LACP)
+
+# --- Single-NIC mode (proxmox_net_mode: single_nic) ---
+proxmox_net_single_interface: ""         # e.g. eth0 — required
+
+# --- Bridge (always created, port is the bond or the single NIC) ---
+proxmox_net_bridge_name: vmbr0
+proxmox_net_bridge_type: OVSBridge
+proxmox_net_mtu: 1500
+
+# --- Node management IP (per-node — set in host_vars, not group_vars) ---
+proxmox_net_mgmt_ip: ""                  # CIDR, e.g. 10.24.0.11/24
+proxmox_net_mgmt_gateway: ""
+proxmox_net_mgmt_vlan: 0                 # 0 = untagged on the bridge itself
+
+# --- Passthrough for anything the typed schema above doesn't cover ---
+# Each key/value emits a separate `ovs_extra set bridge <name> key=val` line
+# on the bridge stanza — ifupdown2/OVS runs these as EXTRA standalone
+# `ovs-vsctl` commands after bridge creation (distinct from `ovs_options`,
+# which instead adds arguments to the primary add-br/add-bond call itself;
+# see templates/interfaces.j2's OVSBond stanza for an ovs_options example).
+# e.g. {rstp_enable: "true"} enables RSTP on the bridge post-creation.
+proxmox_net_extra_bridge_options: {}
+
+# --- Apply / safety gates & auto-revert ---
+# false = render + validate the interfaces file only, no live `ifreload -a`.
+# Use this on a node's first run to review the diff (--check --diff) before
+# ever touching its live network state.
+proxmox_net_apply_changes: true
+proxmox_net_revert_on_failure: true
+proxmox_net_revert_timeout: 30
+proxmox_net_safety_check_ping_gateway: true
+proxmox_net_wait_for_connection_timeout: 60
+proxmox_net_interfaces_path: /etc/network/interfaces
+proxmox_net_rollback_helper_path: /usr/local/sbin/proxmox-net-rollback
+

@@ -1,0 +1,13 @@
+---
+- name: Validate proxmox_net_* variables
+  ansible.builtin.import_tasks: assert.yml
+
+- name: Install OVS network stack packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Render network interfaces configuration
+  ansible.builtin.import_tasks: interfaces.yml
+
+- name: Apply network configuration
+  ansible.builtin.import_tasks: apply.yml
+  when: proxmox_net_apply_changes | bool

@@ -1,0 +1,48 @@
+---
+# `validate` runs before the templated file ever replaces the live one, and a
+# non-zero exit here blocks the write entirely — the safe failure mode for a
+# task that reconfigures the network Ansible is connected through.
+#
+# Verified against the ifupdown2 manpages (ifreload(8), ifquery(8)):
+# `ifreload` has NO flag to point at an arbitrary candidate file — it only
+# ever validates/applies the live /etc/network/interfaces, so it cannot be
+# used here (Ansible's `validate` passes a temp-file path via %s, which
+# ifreload has no way to target). `ifquery` DOES support `-i/--interfaces
+# FILE` to read an arbitrary file. Its `--check` mode compares the file
+# against *running* interface state (and is explicitly documented as
+# "currently experimental" with known gaps, e.g. it can't validate
+# pre-up/post-up commands) — the wrong tool for "is this new file
+# syntactically valid", since a perfectly valid file describing a new
+# desired state can legitimately differ from current running state. So this
+# uses plain `ifquery -i %s -a` (no --check): ifquery must fully parse
+# every `auto`-marked stanza in the file to enumerate them, so a syntax
+# error in the templated file makes this step fail non-zero before the
+# real file is ever touched — pure parse validation, matching what this
+# step actually needs to guarantee.
+- name: Check if existing network configuration exists
+  ansible.builtin.stat:
+    path: "{{ proxmox_net_interfaces_path }}"
+  register: _proxmox_net_interfaces_stat
+
+- name: Save working network configuration for rollback
+  ansible.builtin.copy:
+    src: "{{ proxmox_net_interfaces_path }}"
+    dest: "{{ proxmox_net_interfaces_path }}.ansible-rollback"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: _proxmox_net_interfaces_stat.stat.exists
+
+- name: Render /etc/network/interfaces
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: "{{ proxmox_net_interfaces_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+    validate: "ifquery -i %s -a"
+  register: _proxmox_net_interfaces_template
+  notify: apply proxmox network config
+

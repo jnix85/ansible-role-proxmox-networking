@@ -1,0 +1,11 @@
+---
+# Example host_vars for a node with only one physical NIC — overrides the
+# bonded defaults from group_vars/proxmox.yml entirely for this host.
+proxmox_net_mode: single_nic
+proxmox_net_single_interface: eth0
+
+proxmox_net_bridge_name: vmbr0
+proxmox_net_mtu: 1500
+
+proxmox_net_mgmt_ip: 192.0.2.12/24
+proxmox_net_mgmt_gateway: 192.0.2.1

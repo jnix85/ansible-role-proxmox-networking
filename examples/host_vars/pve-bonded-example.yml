@@ -1,0 +1,5 @@
+---
+# Per-node management IP for the bonded example host (see group_vars/proxmox.yml
+# for the shared bond/bridge topology).
+proxmox_net_mgmt_ip: 192.0.2.11/24
+proxmox_net_mgmt_gateway: 192.0.2.1

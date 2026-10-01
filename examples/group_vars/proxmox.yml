@@ -1,0 +1,27 @@
+---
+# Example group_vars for the common case: two physical NICs bonded together,
+# with a single OVS bridge on top that Proxmox SDN VNets will later attach
+# to. Copy into your inventory's group_vars/proxmox.yml and adjust.
+
+proxmox_net_mode: bond
+proxmox_net_bond_name: bond0
+proxmox_net_bond_interfaces:
+  - ens18
+  - ens19
+proxmox_net_bond_mode: balance-tcp
+proxmox_net_bond_lacp: true          # requires LACP configured on the switch side too
+
+proxmox_net_bridge_name: vmbr0
+proxmox_net_mtu: 1500
+
+# Example: enable RSTP on the bridge post-creation via an extra `ovs-vsctl
+# set bridge` command (see defaults/main.yml for the ovs_extra vs
+# ovs_options distinction this implements).
+proxmox_net_extra_bridge_options:
+  rstp_enable: "true"
+
+# proxmox_net_mgmt_ip / proxmox_net_mgmt_gateway are per-node — set them in
+# host_vars (see host_vars/pve-example1.yml) rather than here, since every
+# node needs a distinct IP.
+
+proxmox_net_apply_changes: true

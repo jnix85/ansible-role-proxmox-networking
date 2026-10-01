@@ -1,0 +1,17 @@
+---
+- name: Install OVS network stack packages
+  ansible.builtin.apt:
+    name: "{{ proxmox_net_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install network rollback helper script
+  ansible.builtin.template:
+    src: proxmox-net-rollback.sh.j2
+    dest: "{{ proxmox_net_rollback_helper_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+

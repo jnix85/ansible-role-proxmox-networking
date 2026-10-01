@@ -1,0 +1,4 @@
+---
+# Reserved for OS-version-specific overrides (e.g. package name differences
+# between Debian releases). Empty for now — Proxmox VE 8.x (Debian bookworm)
+# is the only supported target today.

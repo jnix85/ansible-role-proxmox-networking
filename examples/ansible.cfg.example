@@ -1,0 +1,10 @@
+[defaults]
+; Copy this to ansible.cfg *alongside* your real site.yml and inventory —
+; recommended location is one level up from both role repos, i.e.
+; /Users/jparks/files/Projects/ansible/ansible.cfg, so that
+; roles_path = . lets bare role names in site.yml
+; (ansible-role-proxmox-networking, ansible-role-proxmox-sdn) resolve to
+; the sibling repo directories by name, with no symlinking required.
+roles_path = .
+host_key_checking = True
+retry_files_enabled = False
